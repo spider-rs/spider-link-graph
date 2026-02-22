@@ -2,7 +2,7 @@
 
 Crawl websites and visualize internal link structure as an interactive force-directed graph using [Spider Cloud](https://spider.cloud) — the fastest web crawling infrastructure.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/spider-rs/spider-link-graph)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fspider-rs%2Fspider-link-graph&env=NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY)
 
 **Live Demo:** [https://link-graph.spider.cloud](https://link-graph.spider.cloud)
 
@@ -14,6 +14,7 @@ Crawl websites and visualize internal link structure as an interactive force-dir
 - Local IndexedDB storage for caching results
 - Dark theme matching spider.cloud branding
 - Configurable crawl settings (limit, format, request type)
+- Cross-app switcher to jump between all [Spider Cloud](https://spider.cloud) tools with the current URL pre-filled
 
 ## Getting Started
 
@@ -67,6 +68,20 @@ Open [http://localhost:3001](http://localhost:3001) in your browser.
 - [shadcn/ui](https://ui.shadcn.com/) — UI components
 - [Supabase](https://supabase.com/) — Authentication
 - [Spider Cloud](https://spider.cloud) — Web crawling API
+
+## Related Spider Cloud Tools
+
+| Tool | URL |
+|------|-----|
+| Archiver | [archiver.spider.cloud](https://archiver.spider.cloud) |
+| Dead Link Checker | [dead-link-checker.spider.cloud](https://dead-link-checker.spider.cloud) |
+| A11y Checker | [a11y-checker.spider.cloud](https://a11y-checker.spider.cloud) |
+| Knowledge Base | [knowledge-base.spider.cloud](https://knowledge-base.spider.cloud) |
+| Perf Runner | [perf-runner.spider.cloud](https://perf-runner.spider.cloud) |
+| Content Translator | [content-translator.spider.cloud](https://content-translator.spider.cloud) |
+| Diff Monitor | [diff-monitor.spider.cloud](https://diff-monitor.spider.cloud) |
+| Sitemap Generator | [sitemap-generator.spider.cloud](https://sitemap-generator.spider.cloud) |
+| Link Graph | [link-graph.spider.cloud](https://link-graph.spider.cloud) |
 
 ## License
 
