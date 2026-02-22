@@ -102,6 +102,13 @@ export default function Graph() {
         const r = Math.max(4, Math.min(16, 4 + n.inDegree * 2));
         ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fillStyle = n === hovered ? "#fff" : "#3bde77"; ctx.fill();
+        // Label
+        let pathname = "/";
+        try { pathname = new URL(n.id).pathname; } catch {}
+        if (pathname.length > 30) pathname = pathname.slice(0, 27) + "...";
+        ctx.font = "10px monospace";
+        ctx.fillStyle = n === hovered ? "#fff" : "rgba(255,255,255,0.7)";
+        ctx.fillText(pathname, n.x + r + 4, n.y + 3);
       }
       animRef.current = requestAnimationFrame(tick);
     };
