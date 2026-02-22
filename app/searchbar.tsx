@@ -55,7 +55,7 @@ const SearchBar = ({
     const current = performance.now();
     let pages = 0;
     let finished = false;
-    toast({ title: "Crawling", description: `Crawling ${urlList.length} website${urlList.length === 1 ? "" : "s"}.` });
+    toast({ title: "Crawling started", description: `Fetching up to ${crawlLimit} pages from ${urlList.length} website${urlList.length === 1 ? "" : "s"}...` });
     try {
       const res = await fetch(API_URL + "/crawl", {
         method: "POST",
@@ -97,7 +97,7 @@ const SearchBar = ({
       if (!finished && !pages) {
         // error toast already shown above
       } else if (finished) {
-        toast({ title: "Crawl finished", description: `Took ${ms(performance.now() - current, { long: true })} for ${pages} page${pages === 1 ? "" : "s"}.` });
+        toast({ title: "Crawl complete", description: `${pages} page${pages === 1 ? "" : "s"} crawled in ${ms(performance.now() - current, { long: true })}.` });
         if (crawledPagesRef.current.length) {
           savePages(crawledPagesRef.current).then(() => onSaveComplete?.()).catch(console.error);
         }
