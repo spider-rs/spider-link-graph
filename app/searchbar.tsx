@@ -62,7 +62,9 @@ const SearchBar = ({
         body: JSON.stringify({ url: urlList.join(","), limit: crawlLimit, return_format: returnFormat, request }),
         headers: { "content-type": "application/jsonl", authorization: apiKey || jwt },
       });
-      if (res.ok) {
+      if (!res.ok) {
+        toast({ title: "Crawl failed", description: `Server returned ${res.status}. Check your API key and credits.`, variant: "destructive" });
+      } else {
         finished = true;
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
@@ -86,10 +88,15 @@ const SearchBar = ({
           }
         }
       }
-    } catch (e) { console.error(e); } finally {
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Network error", description: "Could not reach the server. Please try again.", variant: "destructive" });
+    } finally {
       setDataLoading(false);
       streamBufferRef.current = "";
-      if (finished) {
+      if (!finished && !pages) {
+        // error toast already shown above
+      } else if (finished) {
         toast({ title: "Crawl finished", description: `Took ${ms(performance.now() - current, { long: true })} for ${pages} page${pages === 1 ? "" : "s"}.` });
         if (crawledPagesRef.current.length) {
           savePages(crawledPagesRef.current).then(() => onSaveComplete?.()).catch(console.error);
@@ -162,7 +169,7 @@ const SearchBar = ({
               </div>
               <div>
                 <Label htmlFor="sk-key">API Key</Label>
-                <Input placeholder="sk-somesecret" id="sk-key" onChange={(e) => setAPIKey(e.currentTarget.value)} />
+                <Input placeholder="sk-somesecret" type="password" id="sk-key" onChange={(e) => setAPIKey(e.currentTarget.value)} />
                 <p className="py-2 text-sm text-muted-foreground">This key is only used in the current session.</p>
               </div>
               <Button type="button" onClick={() => setConfigModalOpen(false)} className="self-end">Save</Button>
