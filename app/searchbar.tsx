@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Dispatch, SyntheticEvent, useRef, useState } from "react";
+import React, { Dispatch, SyntheticEvent, useEffect, useRef, useState } from "react";
 import { VscLoading, VscSearch, VscSettings } from "react-icons/vsc";
 import ms from "ms";
 import {
@@ -14,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import AuthDropdown, { useAuthMenu, supabase } from "./auth";
+import AppSwitcher from "./app-switcher";
 import { savePages } from "@/lib/storage";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3031";
@@ -36,6 +37,11 @@ const SearchBar = ({
   const streamBufferRef = useRef("");
   const auth = useAuthMenu();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const prefill = new URLSearchParams(window.location.search).get("url");
+    if (prefill) setURl(prefill);
+  }, []);
 
   const onAPIEvent = async (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -128,6 +134,7 @@ const SearchBar = ({
                 id="website-form"
                 className="pl-9 pr-3 h-9 text-sm w-full rounded-lg border-muted-foreground/25 bg-muted/40 placeholder:text-muted-foreground/50 focus-visible:ring-[#3bde77]/40 focus-visible:border-[#3bde77]/50 transition-colors"
                 placeholder="Enter website URL to crawl..."
+                value={url}
                 onChange={(e) => setURl(e.currentTarget.value)}
               />
             </div>
@@ -145,6 +152,7 @@ const SearchBar = ({
             </Button>
           </form>
           <div className="flex items-center gap-1 shrink-0">
+            <AppSwitcher currentUrl={url} />
             {auth?.$session ? (
               <Button type="button" variant="ghost" size="sm" onClick={() => setConfigModalOpen(true)} className="h-8 w-8 p-0 rounded-lg text-muted-foreground hover:text-foreground">
                 <VscSettings className="w-4 h-4" />
