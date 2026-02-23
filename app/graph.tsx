@@ -11,6 +11,7 @@ interface GraphNode {
   vy: number;
   inDegree: number;
   outDegree: number;
+  pinned?: boolean;
 }
 interface GraphEdge {
   source: string;
@@ -58,6 +59,9 @@ export default function Graph() {
     camStartY: number;
   }>({ node: null, panning: false, startX: 0, startY: 0, camStartX: 0, camStartY: 0 });
 
+  // Adjacency lookup for fast neighbor checks
+  const adjacencyRef = useRef<Map<string, Set<string>>>(new Map());
+
   const buildGraph = useCallback(() => {
     if (!data?.length) return;
     const pageUrls = new Set(
@@ -66,6 +70,8 @@ export default function Graph() {
     const inDeg = new Map<string, number>();
     const outDeg = new Map<string, number>();
     const edges: GraphEdge[] = [];
+    const adjacency = new Map<string, Set<string>>();
+
     for (const page of data) {
       if (!page?.url || !page?.content) continue;
       const links = extractInternalLinks(page.content, page.url).filter((l) =>
@@ -73,21 +79,28 @@ export default function Graph() {
       );
       outDeg.set(page.url, links.length);
       for (const link of links) {
+        if (link === page.url) continue; // skip self-links
         inDeg.set(link, (inDeg.get(link) || 0) + 1);
         edges.push({ source: page.url, target: link });
+        // Build adjacency
+        if (!adjacency.has(page.url)) adjacency.set(page.url, new Set());
+        if (!adjacency.has(link)) adjacency.set(link, new Set());
+        adjacency.get(page.url)!.add(link);
+        adjacency.get(link)!.add(page.url);
       }
     }
 
     const count = pageUrls.size;
-    // Spread nodes in a large circle proportional to count
-    const radius = Math.max(200, count * 12);
+    // Large initial spread — golden angle distribution for even spacing
+    const spreadRadius = Math.max(400, count * 35);
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
     const nodes: GraphNode[] = [...pageUrls].map((url, i) => {
-      const angle = (i / count) * Math.PI * 2;
-      const jitter = (Math.random() - 0.5) * radius * 0.3;
+      const angle = i * goldenAngle;
+      const r = spreadRadius * Math.sqrt((i + 1) / count);
       return {
         id: url,
-        x: Math.cos(angle) * (radius + jitter),
-        y: Math.sin(angle) * (radius + jitter),
+        x: Math.cos(angle) * r,
+        y: Math.sin(angle) * r,
         vx: 0,
         vy: 0,
         inDegree: inDeg.get(url) || 0,
@@ -97,10 +110,32 @@ export default function Graph() {
 
     nodesRef.current = nodes;
     edgesRef.current = edges;
+    adjacencyRef.current = adjacency;
     setStats({ nodes: nodes.length, edges: edges.length });
 
-    // Reset camera to center on graph
-    camRef.current = { x: 0, y: 0, zoom: 1 };
+    // Auto-fit camera zoom to show all nodes
+    if (nodes.length > 1) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        }
+        const graphW = maxX - minX + 100;
+        const graphH = maxY - minY + 100;
+        const cw = canvas.clientWidth;
+        const ch = canvas.clientHeight;
+        const fitZoom = Math.min(cw / graphW, ch / graphH, 1.5) * 0.85;
+        camRef.current = { x: 0, y: 0, zoom: fitZoom };
+      } else {
+        camRef.current = { x: 0, y: 0, zoom: 0.5 };
+      }
+    } else {
+      camRef.current = { x: 0, y: 0, zoom: 1 };
+    }
   }, [data]);
 
   useEffect(() => {
@@ -115,6 +150,7 @@ export default function Graph() {
     if (!ctx) return;
     let running = true;
     let alpha = 1;
+    let tickCount = 0;
 
     const tick = () => {
       if (!running) return;
@@ -134,35 +170,38 @@ export default function Graph() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       if (nodes.length > 0) {
-        // Alpha decay
-        alpha *= 0.997;
+        tickCount++;
+        // Slow alpha decay — let the simulation run longer
+        alpha *= 0.9985;
         if (alpha < 0.001) alpha = 0.001;
 
         const nodeCount = nodes.length;
-        // Adaptive repulsion scales with node count
-        const repulsionStrength = Math.min(8000, 3000 + nodeCount * 40);
-        const targetDist = Math.max(120, 80 + nodeCount * 1.5);
 
-        // Damping
+        // --- Velocity damping ---
+        const damping = 0.82;
         for (const n of nodes) {
-          n.vx *= 0.55;
-          n.vy *= 0.55;
+          n.vx *= damping;
+          n.vy *= damping;
         }
 
-        // Center gravity — gentle pull toward origin
+        // --- Center gravity: very gentle pull toward origin ---
+        const gravity = 0.002 * alpha;
         for (const n of nodes) {
-          n.vx += -n.x * 0.003 * alpha;
-          n.vy += -n.y * 0.003 * alpha;
+          n.vx -= n.x * gravity;
+          n.vy -= n.y * gravity;
         }
 
-        // Repulsion (charge force)
+        // --- Repulsion: Coulomb's law with NO cap ---
+        // Use 1/dist (not 1/dist^2) for longer-range repulsion that prevents clumping
+        const repulsionK = 800 + nodeCount * 80;
         for (let i = 0; i < nodeCount; i++) {
           for (let j = i + 1; j < nodeCount; j++) {
             const dx = nodes[j].x - nodes[i].x;
             const dy = nodes[j].y - nodes[i].y;
             const distSq = dx * dx + dy * dy;
-            const dist = Math.max(Math.sqrt(distSq), 1);
-            const force = (repulsionStrength / distSq) * alpha;
+            const dist = Math.sqrt(distSq) || 0.1;
+            // 1/dist repulsion — much longer range than 1/dist^2
+            const force = (repulsionK / dist) * alpha;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
             nodes[i].vx -= fx;
@@ -172,16 +211,41 @@ export default function Graph() {
           }
         }
 
-        // Attraction along edges (spring force)
+        // --- Collision: prevent node overlap ---
+        const collisionPad = 8;
+        for (let i = 0; i < nodeCount; i++) {
+          for (let j = i + 1; j < nodeCount; j++) {
+            const dx = nodes[j].x - nodes[i].x;
+            const dy = nodes[j].y - nodes[i].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+            const ri = nodeRadius(nodes[i]);
+            const rj = nodeRadius(nodes[j]);
+            const minDist = ri + rj + collisionPad;
+            if (dist < minDist) {
+              const push = (minDist - dist) * 0.5;
+              const ux = dx / dist;
+              const uy = dy / dist;
+              nodes[i].x -= ux * push;
+              nodes[i].y -= uy * push;
+              nodes[j].x += ux * push;
+              nodes[j].y += uy * push;
+            }
+          }
+        }
+
+        // --- Attraction along edges: weak spring ---
         const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+        const idealLen = Math.max(180, 120 + nodeCount * 3);
+        const springK = 0.0015 * alpha;
         for (const edge of edges) {
           const s = nodeMap.get(edge.source);
           const t = nodeMap.get(edge.target);
           if (!s || !t) continue;
           const dx = t.x - s.x;
           const dy = t.y - s.y;
-          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const force = (dist - targetDist) * 0.008 * alpha;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+          const displacement = dist - idealLen;
+          const force = displacement * springK;
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
           s.vx += fx;
@@ -190,29 +254,76 @@ export default function Graph() {
           t.vy -= fy;
         }
 
-        // Velocity clamping + position update
+        // --- Velocity clamping + position update ---
+        const maxSpeed = 15;
         for (const n of nodes) {
-          // Pin dragged node
-          if (drag.node === n) {
+          if (n.pinned || drag.node === n) {
             n.vx = 0;
             n.vy = 0;
             continue;
           }
           const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
-          if (speed > 8) {
-            n.vx = (n.vx / speed) * 8;
-            n.vy = (n.vy / speed) * 8;
+          if (speed > maxSpeed) {
+            n.vx = (n.vx / speed) * maxSpeed;
+            n.vy = (n.vy / speed) * maxSpeed;
           }
           n.x += n.vx;
           n.y += n.vy;
         }
+
+        // Auto-fit camera during early ticks
+        if (tickCount % 60 === 0 && tickCount < 300 && alpha > 0.3) {
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const n of nodes) {
+            if (n.x < minX) minX = n.x;
+            if (n.x > maxX) maxX = n.x;
+            if (n.y < minY) minY = n.y;
+            if (n.y > maxY) maxY = n.y;
+          }
+          const graphW = maxX - minX + 200;
+          const graphH = maxY - minY + 200;
+          if (graphW > 0 && graphH > 0 && !drag.node && !drag.panning) {
+            const fitZoom = Math.min(cw / graphW, ch / graphH, 2) * 0.85;
+            cam.zoom += (fitZoom - cam.zoom) * 0.1;
+          }
+        }
       }
 
       // --- Drawing ---
-      ctx.fillStyle = "hsl(240, 10%, 3.5%)";
+      ctx.fillStyle = "#07080a";
       ctx.fillRect(0, 0, cw, ch);
 
+      // Subtle grid
+      ctx.save();
+      ctx.translate(cw / 2 + cam.x, ch / 2 + cam.y);
+      ctx.scale(cam.zoom, cam.zoom);
+      const gridSize = 80;
+      const gridRange = 4000;
+      ctx.strokeStyle = "rgba(255,255,255,0.015)";
+      ctx.lineWidth = 0.5 / cam.zoom;
+      for (let gx = -gridRange; gx <= gridRange; gx += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(gx, -gridRange);
+        ctx.lineTo(gx, gridRange);
+        ctx.stroke();
+      }
+      for (let gy = -gridRange; gy <= gridRange; gy += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(-gridRange, gy);
+        ctx.lineTo(gridRange, gy);
+        ctx.stroke();
+      }
+      ctx.restore();
+
       if (nodes.length === 0) {
+        // Empty state
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        ctx.font = "16px ui-monospace, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Enter a URL to visualize its link structure", cw / 2, ch / 2);
+        ctx.restore();
         animRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -224,8 +335,16 @@ export default function Graph() {
 
       const nodeMap = new Map(nodes.map((n) => [n.id, n]));
       const hoveredNode = hovered;
+      const adj = adjacencyRef.current;
 
-      // Edges — curved quadratic bezier with opacity based on connectivity
+      // Set of hovered node's neighbor IDs
+      const hovNeighbors = new Set<string>();
+      if (hoveredNode) {
+        const s = adj.get(hoveredNode.id);
+        if (s) s.forEach((id) => hovNeighbors.add(id));
+      }
+
+      // --- Edges ---
       for (const edge of edges) {
         const s = nodeMap.get(edge.source);
         const t = nodeMap.get(edge.target);
@@ -234,12 +353,12 @@ export default function Graph() {
         const isHighlighted =
           hoveredNode &&
           (s.id === hoveredNode.id || t.id === hoveredNode.id);
+        const dimmed = hoveredNode && !isHighlighted;
 
         const dx = t.x - s.x;
         const dy = t.y - s.y;
-        // Curve offset perpendicular to the line
-        const len = Math.sqrt(dx * dx + dy * dy);
-        const curvature = Math.min(30, len * 0.1);
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const curvature = Math.min(25, len * 0.08);
         const mx = (s.x + t.x) / 2 + (-dy / len) * curvature;
         const my = (s.y + t.y) / 2 + (dx / len) * curvature;
 
@@ -248,18 +367,20 @@ export default function Graph() {
         ctx.quadraticCurveTo(mx, my, t.x, t.y);
 
         if (isHighlighted) {
-          ctx.strokeStyle = "rgba(59, 222, 119, 0.6)";
-          ctx.lineWidth = 1.5 / cam.zoom;
+          ctx.strokeStyle = "rgba(59, 222, 119, 0.7)";
+          ctx.lineWidth = 2 / cam.zoom;
+        } else if (dimmed) {
+          ctx.strokeStyle = "rgba(59, 222, 119, 0.025)";
+          ctx.lineWidth = 0.5 / cam.zoom;
         } else {
-          ctx.strokeStyle = "rgba(59, 222, 119, 0.08)";
-          ctx.lineWidth = 0.8 / cam.zoom;
+          ctx.strokeStyle = "rgba(59, 222, 119, 0.07)";
+          ctx.lineWidth = 0.7 / cam.zoom;
         }
         ctx.stroke();
 
-        // Arrow head on highlighted edges
+        // Arrow on highlighted edges
         if (isHighlighted) {
           const arrowLen = 8 / cam.zoom;
-          // Point along curve near target
           const at = 0.85;
           const ax = (1 - at) * (1 - at) * s.x + 2 * (1 - at) * at * mx + at * at * t.x;
           const ay = (1 - at) * (1 - at) * s.y + 2 * (1 - at) * at * my + at * at * t.y;
@@ -268,41 +389,36 @@ export default function Graph() {
           const aLen = Math.sqrt(adx * adx + ady * ady) || 1;
           const ux = adx / aLen;
           const uy = ady / aLen;
-          // Arrow tip near target
-          const tipX = t.x - ux * (nodeRadius(t) + 2 / cam.zoom);
-          const tipY = t.y - uy * (nodeRadius(t) + 2 / cam.zoom);
+          const tr = nodeRadius(t);
+          const tipX = t.x - ux * (tr + 3 / cam.zoom);
+          const tipY = t.y - uy * (tr + 3 / cam.zoom);
           ctx.beginPath();
           ctx.moveTo(tipX, tipY);
           ctx.lineTo(tipX - ux * arrowLen + uy * arrowLen * 0.4, tipY - uy * arrowLen - ux * arrowLen * 0.4);
           ctx.lineTo(tipX - ux * arrowLen - uy * arrowLen * 0.4, tipY - uy * arrowLen + ux * arrowLen * 0.4);
           ctx.closePath();
-          ctx.fillStyle = "rgba(59, 222, 119, 0.6)";
+          ctx.fillStyle = "rgba(59, 222, 119, 0.7)";
           ctx.fill();
         }
       }
 
-      // Nodes
+      // --- Nodes ---
       const maxDegree = Math.max(1, ...nodes.map((n) => n.inDegree + n.outDegree));
 
       for (const n of nodes) {
         const r = nodeRadius(n);
         const isHov = hoveredNode?.id === n.id;
-        const isNeighbor =
-          hoveredNode &&
-          edges.some(
-            (e) =>
-              (e.source === hoveredNode.id && e.target === n.id) ||
-              (e.target === hoveredNode.id && e.source === n.id)
-          );
+        const isNeighbor = hovNeighbors.has(n.id);
+        const dimmed = hoveredNode && !isHov && !isNeighbor;
         const degree = n.inDegree + n.outDegree;
         const importance = degree / maxDegree;
 
-        // Glow for high-degree or hovered nodes
-        if (isHov || importance > 0.3) {
-          const glowR = r + (isHov ? 12 : 6) / cam.zoom;
-          const grad = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
-          grad.addColorStop(0, isHov ? "rgba(255, 255, 255, 0.25)" : "rgba(59, 222, 119, 0.15)");
-          grad.addColorStop(1, "rgba(59, 222, 119, 0)");
+        // Outer glow
+        if (isHov || (importance > 0.4 && !dimmed)) {
+          const glowR = r + (isHov ? 16 : 8) / cam.zoom;
+          const grad = ctx.createRadialGradient(n.x, n.y, r * 0.3, n.x, n.y, glowR);
+          grad.addColorStop(0, isHov ? "rgba(255, 255, 255, 0.3)" : "rgba(59, 222, 119, 0.2)");
+          grad.addColorStop(1, "transparent");
           ctx.beginPath();
           ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
           ctx.fillStyle = grad;
@@ -316,85 +432,70 @@ export default function Graph() {
           ctx.fillStyle = "#ffffff";
         } else if (isNeighbor) {
           ctx.fillStyle = "#6aeea0";
+        } else if (dimmed) {
+          ctx.fillStyle = `rgba(30, ${100 + importance * 40}, ${50 + importance * 20}, 0.3)`;
         } else {
-          // Color intensity by importance
-          const g = Math.round(180 + importance * 75);
-          ctx.fillStyle = `rgb(40, ${g}, ${Math.round(80 + importance * 40)})`;
+          const g = Math.round(160 + importance * 95);
+          ctx.fillStyle = `rgb(30, ${g}, ${Math.round(70 + importance * 50)})`;
         }
         ctx.fill();
 
-        // Subtle ring on important nodes
-        if (importance > 0.5 && !isHov) {
+        // Ring on important nodes
+        if (importance > 0.5 && !dimmed) {
           ctx.beginPath();
-          ctx.arc(n.x, n.y, r + 1.5 / cam.zoom, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(59, 222, 119, 0.3)";
-          ctx.lineWidth = 1 / cam.zoom;
+          ctx.arc(n.x, n.y, r + 2 / cam.zoom, 0, Math.PI * 2);
+          ctx.strokeStyle = isHov ? "rgba(255,255,255,0.5)" : "rgba(59, 222, 119, 0.35)";
+          ctx.lineWidth = 1.2 / cam.zoom;
           ctx.stroke();
         }
       }
 
-      // Labels — only for hovered, its neighbors, and top-degree nodes
-      const labelCount = Math.max(2, Math.floor(nodes.length * 0.15));
-      const sortedByDegree = [...nodes].sort((a, b) => (b.inDegree + b.outDegree) - (a.inDegree + a.outDegree));
-      const cutoffNode = sortedByDegree[Math.min(labelCount, nodes.length - 1)];
-      const topDegreeThreshold = cutoffNode ? cutoffNode.inDegree + cutoffNode.outDegree : 0;
+      // --- Labels: only hovered node + its neighbors ---
+      if (hoveredNode) {
+        const labelNodes = [hoveredNode, ...nodes.filter((n) => hovNeighbors.has(n.id))];
+        for (const n of labelNodes) {
+          const isHov = n.id === hoveredNode.id;
+          let pathname = "/";
+          try { pathname = new URL(n.id).pathname; } catch {}
+          if (pathname.length > 40) pathname = pathname.slice(0, 37) + "...";
 
-      for (const n of nodes) {
-        const isHov = hoveredNode?.id === n.id;
-        const isNeighbor =
-          hoveredNode &&
-          edges.some(
-            (e) =>
-              (e.source === hoveredNode.id && e.target === n.id) ||
-              (e.target === hoveredNode.id && e.source === n.id)
-          );
-        const degree = n.inDegree + n.outDegree;
-        const showLabel = isHov || isNeighbor || degree >= topDegreeThreshold;
+          const r = nodeRadius(n);
+          const fontSize = isHov ? 12 : 10;
+          ctx.font = `${fontSize / cam.zoom}px ui-monospace, monospace`;
 
-        if (!showLabel) continue;
+          const textW = ctx.measureText(pathname).width;
+          const lx = n.x + r + 6 / cam.zoom;
+          const ly = n.y;
+          const pad = 4 / cam.zoom;
 
-        let pathname = "/";
-        try {
-          pathname = new URL(n.id).pathname;
-        } catch {}
-        if (pathname.length > 35) pathname = pathname.slice(0, 32) + "...";
+          // Background pill
+          ctx.fillStyle = "rgba(7, 8, 10, 0.88)";
+          const bx = lx - pad;
+          const by = ly - fontSize / cam.zoom / 2 - pad;
+          const bw = textW + pad * 2;
+          const bh = fontSize / cam.zoom + pad * 2;
+          const br = 4 / cam.zoom;
+          ctx.beginPath();
+          ctx.moveTo(bx + br, by);
+          ctx.lineTo(bx + bw - br, by);
+          ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + br);
+          ctx.lineTo(bx + bw, by + bh - br);
+          ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - br, by + bh);
+          ctx.lineTo(bx + br, by + bh);
+          ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - br);
+          ctx.lineTo(bx, by + br);
+          ctx.quadraticCurveTo(bx, by, bx + br, by);
+          ctx.closePath();
+          ctx.fill();
+          // Border
+          ctx.strokeStyle = isHov ? "rgba(255,255,255,0.2)" : "rgba(59,222,119,0.2)";
+          ctx.lineWidth = 0.8 / cam.zoom;
+          ctx.stroke();
 
-        const r = nodeRadius(n);
-        const fontSize = Math.max(9, Math.min(12, 10 + (degree / maxDegree) * 3));
-        ctx.font = `${fontSize / cam.zoom}px ui-monospace, monospace`;
-
-        // Label background for readability
-        const textW = ctx.measureText(pathname).width;
-        const lx = n.x + r + 5 / cam.zoom;
-        const ly = n.y;
-        const pad = 3 / cam.zoom;
-
-        ctx.fillStyle = "rgba(10, 10, 15, 0.75)";
-        ctx.beginPath();
-        const bx = lx - pad;
-        const by = ly - fontSize / cam.zoom / 2 - pad;
-        const bw = textW + pad * 2;
-        const bh = fontSize / cam.zoom + pad * 2;
-        const br = 3 / cam.zoom;
-        ctx.moveTo(bx + br, by);
-        ctx.lineTo(bx + bw - br, by);
-        ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + br);
-        ctx.lineTo(bx + bw, by + bh - br);
-        ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - br, by + bh);
-        ctx.lineTo(bx + br, by + bh);
-        ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - br);
-        ctx.lineTo(bx, by + br);
-        ctx.quadraticCurveTo(bx, by, bx + br, by);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = isHov
-          ? "#ffffff"
-          : isNeighbor
-          ? "#6aeea0"
-          : "rgba(255, 255, 255, 0.8)";
-        ctx.textBaseline = "middle";
-        ctx.fillText(pathname, lx, ly);
+          ctx.fillStyle = isHov ? "#ffffff" : "#6aeea0";
+          ctx.textBaseline = "middle";
+          ctx.fillText(pathname, lx, ly);
+        }
       }
 
       ctx.restore();
@@ -410,7 +511,7 @@ export default function Graph() {
   }, [data, hovered]);
 
   function nodeRadius(n: GraphNode): number {
-    return Math.max(4, Math.min(20, 4 + n.inDegree * 1.5 + n.outDegree * 0.5));
+    return Math.max(3, Math.min(18, 3 + n.inDegree * 1.2 + n.outDegree * 0.4));
   }
 
   // --- Interaction handlers ---
@@ -427,10 +528,13 @@ export default function Graph() {
 
   function findNodeAt(wx: number, wy: number): GraphNode | undefined {
     const cam = camRef.current;
-    return nodesRef.current.find((n) => {
-      const r = nodeRadius(n) + 4 / cam.zoom;
-      return Math.hypot(n.x - wx, n.y - wy) < r;
-    });
+    // Check in reverse order so top-drawn nodes are found first
+    for (let i = nodesRef.current.length - 1; i >= 0; i--) {
+      const n = nodesRef.current[i];
+      const r = nodeRadius(n) + 6 / cam.zoom;
+      if (Math.hypot(n.x - wx, n.y - wy) < r) return n;
+    }
+    return undefined;
   }
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -457,7 +561,6 @@ export default function Graph() {
     const drag = dragRef.current;
 
     if (drag.node) {
-      // Dragging a node
       const { x: wx, y: wy } = screenToWorld(sx, sy);
       drag.node.x = wx;
       drag.node.y = wy;
@@ -474,7 +577,6 @@ export default function Graph() {
       return;
     }
 
-    // Hover detection
     const { x: wx, y: wy } = screenToWorld(sx, sy);
     const found = findNodeAt(wx, wy);
     setHovered(found || null);
@@ -494,8 +596,8 @@ export default function Graph() {
     const sy = e.clientY - rect.top;
 
     const oldZoom = cam.zoom;
-    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
-    cam.zoom = Math.max(0.1, Math.min(10, cam.zoom * factor));
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    cam.zoom = Math.max(0.05, Math.min(10, cam.zoom * factor));
 
     // Zoom toward cursor position
     const cx = sx - rect.width / 2;
@@ -567,6 +669,7 @@ export default function Graph() {
             <p>Scroll to zoom</p>
             <p>Drag canvas to pan</p>
             <p>Drag nodes to move</p>
+            <p>Hover nodes for details</p>
           </div>
         </div>
       </div>
