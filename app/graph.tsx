@@ -44,8 +44,9 @@ export default function Graph() {
         edges.push({ source: page.url, target: link });
       }
     }
+    const w = canvasRef.current?.clientWidth || 800, h = canvasRef.current?.clientHeight || 600;
     const nodes: GraphNode[] = [...pageUrls].map((url, i) => ({
-      id: url, x: 400 + Math.cos(i * 2.4) * 200 + Math.random() * 50, y: 300 + Math.sin(i * 2.4) * 200 + Math.random() * 50,
+      id: url, x: w / 2 + Math.cos(i * 2.4) * 150 + Math.random() * 30, y: h / 2 + Math.sin(i * 2.4) * 150 + Math.random() * 30,
       vx: 0, vy: 0, inDegree: inDeg.get(url) || 0, outDegree: outDeg.get(url) || 0,
     }));
     nodesRef.current = nodes;
@@ -60,19 +61,31 @@ export default function Graph() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let running = true;
+    let alpha = 1;
 
     const tick = () => {
       if (!running) return;
       const nodes = nodesRef.current;
       const edges = edgesRef.current;
+      const cx = canvas.clientWidth / 2, cy = canvas.clientHeight / 2;
+
+      // Alpha decay — simulation cools down and settles
+      alpha *= 0.995;
+      if (alpha < 0.001) alpha = 0.001;
+
       // Force simulation
-      for (const n of nodes) { n.vx *= 0.9; n.vy *= 0.9; }
+      for (const n of nodes) { n.vx *= 0.6; n.vy *= 0.6; }
+      // Center gravity — pull toward canvas center
+      for (const n of nodes) {
+        n.vx += (cx - n.x) * 0.005 * alpha;
+        n.vy += (cy - n.y) * 0.005 * alpha;
+      }
       // Repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
           const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          const force = 5000 / (dist * dist);
+          const force = (2000 / (dist * dist)) * alpha;
           nodes[i].vx -= (dx / dist) * force; nodes[i].vy -= (dy / dist) * force;
           nodes[j].vx += (dx / dist) * force; nodes[j].vy += (dy / dist) * force;
         }
@@ -84,11 +97,16 @@ export default function Graph() {
         if (!s || !t) continue;
         const dx = t.x - s.x, dy = t.y - s.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        const force = (dist - 100) * 0.01;
+        const force = (dist - 100) * 0.02 * alpha;
         s.vx += (dx / dist) * force; s.vy += (dy / dist) * force;
         t.vx -= (dx / dist) * force; t.vy -= (dy / dist) * force;
       }
-      for (const n of nodes) { n.x += n.vx; n.y += n.vy; }
+      // Clamp velocities to prevent runaway
+      for (const n of nodes) {
+        const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+        if (speed > 10) { n.vx = (n.vx / speed) * 10; n.vy = (n.vy / speed) * 10; }
+        n.x += n.vx; n.y += n.vy;
+      }
       // Draw
       canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
       ctx.fillStyle = "hsl(240, 10%, 4%)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
