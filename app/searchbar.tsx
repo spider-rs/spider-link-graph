@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import AuthDropdown, { useAuthMenu, supabase } from "./auth";
+import AuthDropdown, { useAuthMenu } from "./auth";
 import AppSwitcher from "./app-switcher";
 import { savePages } from "@/lib/storage";
 
@@ -206,7 +206,7 @@ const SearchBar = ({
               </div>
               <Button type="button" onClick={() => setConfigModalOpen(false)} className="self-end">Save</Button>
               <div className="pt-10 pb-2 flex place-content-end border-t">
-                <Button onClick={async () => { await supabase.auth.signOut(); setConfigModalOpen(false); }} variant="destructive">Logout</Button>
+                <Button onClick={async () => { await auth.signOut(); setConfigModalOpen(false); }} variant="destructive">Logout</Button>
               </div>
             </div>
           </DialogContent>
