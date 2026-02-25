@@ -33,6 +33,7 @@ const SearchBar = ({
   const [returnFormat, setReturnFormat] = useState("raw");
   const [apiKey, setAPIKey] = useState("");
   const [request, setRequest] = useState("smart");
+  const [fullResources, setFullResources] = useState(false);
   const crawledPagesRef = useRef<any[]>([]);
   const streamBufferRef = useRef("");
   const auth = useAuthMenu();
@@ -65,7 +66,7 @@ const SearchBar = ({
     try {
       const res = await fetch(API_URL + "/crawl", {
         method: "POST",
-        body: JSON.stringify({ url: urlList.join(","), limit: crawlLimit, return_format: returnFormat, request }),
+        body: JSON.stringify({ url: urlList.join(","), limit: crawlLimit, return_format: returnFormat, request, ...(fullResources && { full_resources: true }) }),
         headers: { "content-type": "application/jsonl", authorization: apiKey || jwt },
       });
       if (!res.ok) {
@@ -196,6 +197,16 @@ const SearchBar = ({
                     <SelectItem value="http">HTTP</SelectItem>
                     <SelectItem value="chrome">Chrome</SelectItem>
                     <SelectItem value="smart">Smart Mode</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center">
+                <Label className="flex-1">Full Resources:</Label>
+                <Select onValueChange={(v: string) => setFullResources(v === "true")} defaultValue="false">
+                  <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="false">Off</SelectItem>
+                    <SelectItem value="true">On</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
