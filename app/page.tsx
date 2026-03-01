@@ -5,6 +5,20 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col">
       <Graph />
+      <section className="border-t px-6 py-8 max-w-2xl mx-auto text-center text-sm text-muted-foreground">
+        <h2 className="text-base font-medium text-foreground mb-3">
+          Website Link Graph
+        </h2>
+        <p className="mb-3">
+          Visualize the internal link structure of any website as an interactive
+          graph.
+        </p>
+        <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs">
+          <li>Interactive visualization</li>
+          <li>Real-time streaming</li>
+          <li>Export reports</li>
+        </ul>
+      </section>
       <footer className="flex items-center justify-center gap-2 py-3 border-t text-xs text-muted-foreground">
         <span>Powered by</span>
         <a href="https://spider.cloud" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-medium text-foreground hover:text-[#3bde77] transition-colors">
